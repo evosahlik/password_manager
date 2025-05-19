@@ -1,14 +1,35 @@
-from flask import Flask, request, render_template, redirect, url_for, flash, session
-from supabase import create_client, Client
+import httpx
+from httpx import Client
+import httpcore 
 import os
 from dotenv import load_dotenv
+from flask import Flask, request, render_template, redirect, url_for, flash, session
+from supabase import create_client, Client as SupabaseClient 
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
-import httpx
 import logging
+from httpx._transports.default import HTTPTransport
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Custom transport to disable SSL verification
+class NoVerifyTransport(httpx.HTTPTransport):
+    def __init__(self):
+        super().__init__(verify=False)  # Disable SSL verification at transport level
+        logging.debug("NoVerifyTransport initialized with SSL verification disabled")
+
+# Patch httpx.Client to use our custom transport
+def patch_httpx_client():
+    original_init = Client.__init__
+    def new_init(self, *args, **kwargs):
+        kwargs['transport'] = NoVerifyTransport()
+        original_init(self, *args, **kwargs)
+    Client.__init__ = new_init
+    logging.debug("httpx.Client patched successfully")
+
+# Apply the patch before any other imports or usage
+patch_httpx_client()
 
 # Load environment variables
 load_dotenv()
@@ -21,19 +42,8 @@ supabase_url = os.getenv('SUPABASE_URL')
 supabase_key = os.getenv('SUPABASE_KEY')
 logging.debug(f"Supabase URL: {supabase_url}")
 
-# Create HTTP client with default CA store
-http_client = httpx.Client(verify=True)
-
 # Initialize Supabase client
-supabase: Client = create_client(supabase_url, supabase_key)
-try:
-    supabase.postgrest._session = http_client  # For REST API calls
-    supabase.auth._http_client = http_client  # For Auth API calls
-    logging.debug("Supabase client HTTP clients set successfully")
-except AttributeError as e:
-    logging.error(f"Error setting HTTP clients: {str(e)}")
-    raise
-
+supabase: SupabaseClient = create_client(supabase_url, supabase_key)
 logging.debug("Supabase client initialized successfully")
 
 # Database schema creation
@@ -47,6 +57,8 @@ def init_db():
         raise
 
 init_db()
+
+# Rest of your code (routes, etc.) remains unchanged
 
 # Routes
 @app.route('/')
